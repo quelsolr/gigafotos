@@ -121,4 +121,4 @@ ens hem equivocat, per a resetejar la cosa i baixar de git sense esborrar res de
 i ara, per a pujar el nou cap a dalt,
  git add .
  git commit -m "afegim tres mostres"
- git push ?
+ git push
