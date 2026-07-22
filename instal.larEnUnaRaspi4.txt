@@ -1,0 +1,124 @@
+Tot el que es diu aquí serveix també per a una raspi3, però ens vam trobar que
+quan es volia fer una gigafoto, quedava sense memòria i es penjava.
+En una raspi 4, tot funciona fluïd
+
+hem baixat openflexure v3, que ja té raspbian bookworm, i a la primera detecta el display DSI i funciona càmera i motors.
+tal com ve, li hem donat usuari: pi openflexure,
+hem fet sudo raspi-config, activat ssh i donat credencials al wifi
+anant a http://192.168.10.46:5000, tenim el microscopi
+
+està en mode texte, fem
+ sudo apt-get install lightdm openbox lxde
+ activat boot a desktop i autologin en el raspi-config
+
+volem anul.lar que faci tmpfs en ram, per guanyar memòria:
+ sudo systemctl mask tmp.mount
+
+Per a girar la pantalla, al /boot/firmaware/cmdline.txt, afegim al final:
+ video=DSI-1:panel_orientation=right_side_up
+
+amb això engega en mod texte ben orientat, però en engegar l'entorn gràfic, continua mal orientat.
+Per a orientar bé l'entorn gràfic, crear un arxiu /etc/X11/xorg.conf.d/10-monitor.conf, amb contingut:
+ Section "Monitor"
+    Identifier "DSI-1"
+    Option "Rotate" "right"
+ EndSection
+
+aquesta solució funcionava. Al final, hem editat /etc/lightdm/lightdm.conf, i descomentat display-setup-script quedant:
+ display-setup-script=xrandr --output DSI-1 --rotate right
+
+engegar el firefox en local, es menja tota la memòria.
+Baixem openflexure-connect per veure si va més lleuger. hem hagut d'afegir libfuse2?
+ chmod +x openflexure-connect...appimage
+ ./openflexureconnect...appimage
+
+per a orientar bé el touch, fem xinput list per trobar el id del touch capacitiu, veiem que és el 6:
+ xinput set-prop 6 "Coordinate Transformation Matrix" 0 1 0 -1 0 1 0 0 1
+
+#per a fer-ho permanent, editem el .config/lxsession/LXDE/autostart, i afegim al final, amb @, per indicar comanda
+# @xinput set-prop "pointer:Goodix Capacitive TouchScreen" "Coordinate Transformation Matrix" 0 1 0 -1 0 1 0 0 1
+
+no funcionava, hem fet un arxiu .xsessionrc a la carpeta de /home/pi/, amb contingut:
+ sleep 5
+ xinput set-prop "pointer:Goodix Capacitive TouchScreen" "Coordinate Transformation Matrix" 0 1 0 -1 0 1 0 0 1
+ #/home/pi/openflexure-connect-5.0.1-arm64.AppImage --no-sandbox --host http://localhost:5000 &
+ #chromium-browser 127.0.0.1:5000 --kiosk & # veiem que amb chromium podem desactivar acceleració hard i es poden veure les gigafotos en local
+ chromium-browser --app=http://127.0.0.1:5000 --start-maximized & # en kiosk, no podem sortir de la gigafoto si la maximitzem sense teclat
+ blueman-applet &
+
+així també engega automàticament el bluetooth i el openflexure-connect
+el openflexure-connect no ensenya les gigafotos. tampoc el firefox.
+hem instal.lat i configurat el chromium-browser:
+ sudo apt-get install chromium-browser
+ obrim chromium i anem a chrome://settings/system
+ desactivem use graphics acceleration when available
+ 
+
+quan la barra de tasques surt retallada, anar a configurar barra de tasques, i eliminar paginador d'escriptoris.
+
+Per a tenir bluetooth:
+ sudo rfkill unblock bluetooth
+ sudo apt update
+ sudo apt install blueman bluez bluez-tools
+ sudo systemctl enable bluetooth
+ sudo systemctl start bluetooth
+ sudo usermod -G bluetooth -a pi
+ al /boot/firmware/config.txt, hem comentat i afegit:
+  #enable_uart=1
+  #dtoverlay=miniuart-bt
+  dtparam=bluetooth=on
+
+els motors no es mouen. creiem que cal la configuració que teníem desada:
+editem /var/openflexure/settings/ofm_config.json, i queda:
+ {
+    "base_config_file": "/var/openflexure/application/openflexure-microscope-server/ofm_config_full.json",
+    "stage": {
+        "type": "sangaboard",
+        "step_delay": 1000,
+        "ramp_time": 100,
+        "move_timeout": 60,
+        "settle_time": 2.0
+    }
+}
+
+com que el sangaboard firmware 1.0 que haviem baixat no adreçava bé les sortides, hem fet servir el font del 0.5.1, i ara tenim missatge:
+RuntimeError: Sangaboard firmware version 0.5.1 is below the required 1.0.0. Visit http>
+anem a baixar-lo i compilar-lo amb la nostra configuració. Fem:
+ cd /var/openflexure
+ git clone https://gitlab.com/filipayazi/sangaboard-firmware.git 
+ cd sangaboard-firmware
+ nano src/config.h, comentem i afegim:
+    //#define BOARD_AUTO
+    #define BOARD_CUSTOM_PICO
+ necessitem platformio per a compilar, que necessita pip per a instal.lar-se:
+  sudo apt-get install python3-pip
+  python3 -m venv venv
+  source venv/bin/activate
+  pip install platformio
+  pio lib install
+  pio run -e pico
+  ofm stop
+  pio run -e pico -t upload --upload-port /dev/ttyACM0
+  ofm start
+ veiem que Z i X estan canviats. ho canviem a src/boards.h, a la secció BOARD_CUSTOM_PICO
+  pio run -e pico
+  ofm stop
+  pio run -e pico -t upload --upload-port /dev/ttyACM0
+  ofm start   
+  
+****************************
+
+per a penjar la gigafoto, a https://github.com/quelsolr/gigafotos, per a cada gigafoto, hem de penjar un arxiu
+.dzi que descriu la gigafoto, i les carpetes amb les imatges que la composen en una carpeta amb el mateix nom _files.
+per exemple, per a gigafoto1, cal gigafoto1.dzi i una carpeta gigafoto1_files amb les carpetes de les imatges.
+primer fem git clone git clone https://github.com/quelsolr/gigafotos en el lloc on tindrem la còpia local, un usb.
+entrem a la carpeta gigafotos i hi afegim el que volem tenir al núvol.
+per a pujar els canvis, des de l'arrel de gigafotos:
+ens hem equivocat, per a resetejar la cosa i baixar de git sense esborrar res del que tenim:
+ git fetch origin
+ git reset origin/main
+ git checkout .
+i ara, per a pujar el nou cap a dalt,
+ git add .
+ git commit -m "afegim tres mostres"
+ git push ?
